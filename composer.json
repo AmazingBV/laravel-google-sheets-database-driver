@@ -1,5 +1,6 @@
 {
     "name": "amazingbv/laravel-google-sheets-database-driver",
+    "version": "1.0.0",
     "description": "Laravel database driver that treats a Google Sheets spreadsheet as a database.",
     "type": "library",
     "license": "MIT",

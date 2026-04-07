@@ -1,6 +1,9 @@
+<img src="assets/header.png" alt="Laravel Google Sheets Database Driver header" width="100%" />
+
 # Laravel Google Sheets Database Driver
 
-<img src="assets/header.png" alt="Laravel Google Sheets Database Driver header" width="100%" />
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/amazingbv/laravel-google-sheets-database-driver.svg?style=flat-square)](https://packagist.org/packages/amazingbv/laravel-google-sheets-database-driver)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 A Laravel database driver that uses a Google Sheets spreadsheet as its backing store.
 
@@ -255,10 +258,8 @@ If you want to test this package from a local checkout in another Laravel app:
     }
   ],
   "require": {
-    "amazingbv/laravel-google-sheets-database-driver": "*@dev"
-  },
-  "minimum-stability": "dev",
-  "prefer-stable": true
+    "amazingbv/laravel-google-sheets-database-driver": "^1.0"
+  }
 }
 ```
 

@@ -1,5 +1,5 @@
 {
-    "name": "amazingnl/laravel-google-sheets-dbal",
+    "name": "amazingbv/laravel-google-sheets-database-driver",
     "description": "Laravel database driver that treats a Google Sheets spreadsheet as a database.",
     "type": "library",
     "license": "MIT",
@@ -22,18 +22,18 @@
     },
     "autoload": {
         "psr-4": {
-            "AmazingNL\\GoogleSheetsDBAL\\": "src/"
+            "AmazingBV\\GoogleSheetsDatabaseDriver\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "AmazingNL\\GoogleSheetsDBAL\\Tests\\": "tests/"
+            "AmazingBV\\GoogleSheetsDatabaseDriver\\Tests\\": "tests/"
         }
     },
     "extra": {
         "laravel": {
             "providers": [
-                "AmazingNL\\GoogleSheetsDBAL\\GoogleSheetsServiceProvider"
+                "AmazingBV\\GoogleSheetsDatabaseDriver\\GoogleSheetsDatabaseDriverServiceProvider"
             ]
         }
     },

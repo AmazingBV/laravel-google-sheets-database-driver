@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL\Contracts;
+namespace AmazingBV\GoogleSheetsDatabaseDriver\Contracts;
 
 interface SheetsTransport
 {
@@ -30,4 +30,9 @@ interface SheetsTransport
     public function renameSheet(string $from, string $to): void;
 
     public function setSheetHidden(string $title, bool $hidden): void;
+
+    /**
+     * @param  list<array{title: string, sheetId: int|null}>  $entries
+     */
+    public function renderDatabaseIndexSheet(string $title, array $entries): void;
 }

@@ -2,15 +2,15 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL;
+namespace AmazingBV\GoogleSheetsDatabaseDriver;
 
-use AmazingNL\GoogleSheetsDBAL\Contracts\SheetsTransport;
-use AmazingNL\GoogleSheetsDBAL\Data\ColumnSchema;
-use AmazingNL\GoogleSheetsDBAL\Data\TableSchema;
-use AmazingNL\GoogleSheetsDBAL\Exceptions\ConfigurationException;
-use AmazingNL\GoogleSheetsDBAL\Exceptions\GoogleSheetsException;
-use AmazingNL\GoogleSheetsDBAL\Exceptions\SchemaMismatchException;
-use AmazingNL\GoogleSheetsDBAL\Exceptions\UnsupportedSheetsOperation;
+use AmazingBV\GoogleSheetsDatabaseDriver\Contracts\SheetsTransport;
+use AmazingBV\GoogleSheetsDatabaseDriver\Data\ColumnSchema;
+use AmazingBV\GoogleSheetsDatabaseDriver\Data\TableSchema;
+use AmazingBV\GoogleSheetsDatabaseDriver\Exceptions\ConfigurationException;
+use AmazingBV\GoogleSheetsDatabaseDriver\Exceptions\GoogleSheetsException;
+use AmazingBV\GoogleSheetsDatabaseDriver\Exceptions\SchemaMismatchException;
+use AmazingBV\GoogleSheetsDatabaseDriver\Exceptions\UnsupportedSheetsOperation;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Container\Container;
@@ -28,6 +28,8 @@ use JsonException;
 
 class GoogleSheetsDatabase
 {
+    private const DATABASE_INDEX_SHEET = 'Database Index';
+
     private readonly SheetsTransport $transport;
 
     private readonly string $spreadsheetId;
@@ -41,6 +43,16 @@ class GoogleSheetsDatabase
     private readonly ?CacheRepository $cache;
 
     private readonly int $cacheTtl;
+
+    /**
+     * @var array<string, array{hidden: bool, sheetId: int|null}>|null
+     */
+    private ?array $sheetDirectoryCache = null;
+
+    /**
+     * @var array<string, array<int, array<int, mixed>>>
+     */
+    private array $sheetValuesCache = [];
 
     /**
      * @param  array<string, mixed>  $config
@@ -80,15 +92,15 @@ class GoogleSheetsDatabase
 
     public function ensureSystemSheets(): void
     {
-        $sheets = $this->transport->listSheets();
+        $sheets = $this->listSheets();
 
         if (! isset($sheets[$this->schemaSheet])) {
-            $this->transport->createSheet($this->schemaSheet, true);
-            $this->transport->setSheetValues($this->schemaSheet, [
+            $this->createSheet($this->schemaSheet, true);
+            $this->setSheetValues($this->schemaSheet, [
                 ['table', 'columns', 'next_id', 'hidden'],
             ]);
         } else {
-            $this->transport->setSheetHidden($this->schemaSheet, true);
+            $this->setSheetHidden($this->schemaSheet, true);
         }
 
         if (! $this->hasTable($this->migrationsTable)) {
@@ -102,6 +114,8 @@ class GoogleSheetsDatabase
                 true
             );
         }
+
+        $this->syncDatabaseIndexSheet();
     }
 
     public function syncExistingSheets(): void
@@ -110,8 +124,8 @@ class GoogleSheetsDatabase
 
         $metadata = $this->loadMetadata();
 
-        foreach ($this->transport->listSheets() as $sheet => $properties) {
-            if (in_array($sheet, [$this->schemaSheet, $this->migrationsSheet], true)) {
+        foreach ($this->listSheets() as $sheet => $properties) {
+            if ($this->isNonTableSheet($sheet)) {
                 continue;
             }
 
@@ -119,7 +133,7 @@ class GoogleSheetsDatabase
                 continue;
             }
 
-            $values = $this->transport->getSheetValues($sheet);
+            $values = $this->getSheetValues($sheet);
 
             if ($values === []) {
                 continue;
@@ -145,17 +159,31 @@ class GoogleSheetsDatabase
         }
 
         $this->persistMetadata($metadata);
+        $this->syncDatabaseIndexSheet();
     }
 
     public function hasTable(string $table): bool
     {
         $logical = $this->normalizeTableName($table);
 
-        if (isset($this->loadMetadata()[$logical])) {
+        if ($this->isNonTableSheet($logical)) {
+            return false;
+        }
+
+        $metadata = $this->loadMetadata();
+        $physicalExists = $this->physicalTableExists($logical);
+
+        if (isset($metadata[$logical])) {
+            if (! $physicalExists) {
+                $this->removeStaleMetadataEntry($logical, $metadata);
+
+                return false;
+            }
+
             return true;
         }
 
-        return isset($this->transport->listSheets()[$this->mapPhysicalTable($logical)]);
+        return $physicalExists;
     }
 
     public function getColumnListing(string $table): array
@@ -190,9 +218,8 @@ class GoogleSheetsDatabase
                 'dropIfExists' => $this->hasTable($table) ? $this->dropTable($table) : null,
                 'renameColumn' => $this->renameColumn($table, (string) $command->from, (string) $command->to),
                 'dropColumn' => $this->dropColumns($table, Arr::wrap($command->columns)),
-                'primary', 'index', 'unique', 'foreign', 'dropPrimary', 'dropIndex', 'dropUnique', 'dropForeign', 'renameIndex' => throw new UnsupportedSheetsOperation(
-                    sprintf('Schema command [%s] is not supported by the google-sheets driver.', $command->name)
-                ),
+                'primary', 'index', 'unique', 'foreign', 'dropPrimary', 'dropIndex', 'dropUnique', 'dropForeign', 'renameIndex',
+                'fulltext', 'fullText', 'spatialIndex', 'vectorIndex', 'dropFullText', 'dropSpatialIndex', 'dropVectorIndex' => null,
                 default => null,
             };
         }
@@ -319,7 +346,7 @@ class GoogleSheetsDatabase
         }
 
         $physical = $this->mapPhysicalTable($logical);
-        $values = $this->transport->getSheetValues($physical);
+        $values = $this->getSheetValues($physical);
 
         if ($values === []) {
             $snapshot = ['schema' => $schema, 'rows' => []];
@@ -370,7 +397,7 @@ class GoogleSheetsDatabase
             );
         }
 
-        $this->transport->setSheetValues($physical, $payload);
+        $this->setSheetValues($physical, $payload);
 
         $metadata = $this->loadMetadata();
         $metadata[$schema->table] = $schema;
@@ -382,6 +409,10 @@ class GoogleSheetsDatabase
     {
         $logical = $this->normalizeTableName($table);
 
+        if ($this->isNonTableSheet($logical)) {
+            throw new GoogleSheetsException(sprintf('Table name [%s] is reserved by the google-sheets driver.', $logical));
+        }
+
         if ($this->hasTable($logical)) {
             throw new GoogleSheetsException(sprintf('Table [%s] already exists.', $logical));
         }
@@ -391,19 +422,20 @@ class GoogleSheetsDatabase
 
         $schema = new TableSchema($logical, $columns, 1, $hidden);
         $physical = $this->mapPhysicalTable($logical);
-        $sheets = $this->transport->listSheets();
+        $sheets = $this->listSheets();
 
         if (! isset($sheets[$physical])) {
-            $this->transport->createSheet($physical, $hidden);
+            $this->createSheet($physical, $hidden);
         }
 
-        $this->transport->setSheetHidden($physical, $hidden);
-        $this->transport->setSheetValues($physical, [$schema->header()]);
+        $this->setSheetHidden($physical, $hidden);
+        $this->setSheetValues($physical, [$schema->header()]);
 
         $metadata = $this->loadMetadata();
         $metadata[$logical] = $schema;
         $this->persistMetadata($metadata);
         $this->forgetTableCache($logical);
+        $this->syncDatabaseIndexSheet();
     }
 
     private function addColumn(string $table, ColumnDefinition $definition): void
@@ -506,8 +538,8 @@ class GoogleSheetsDatabase
             throw new GoogleSheetsException(sprintf('Table [%s] does not exist.', $from));
         }
 
-        $this->transport->renameSheet($this->mapPhysicalTable($from), $this->mapPhysicalTable($to));
-        $this->transport->setSheetHidden($this->mapPhysicalTable($to), $to === $this->migrationsTable);
+        $this->renameSheet($this->mapPhysicalTable($from), $this->mapPhysicalTable($to));
+        $this->setSheetHidden($this->mapPhysicalTable($to), $to === $this->migrationsTable);
 
         $metadata = $this->loadMetadata();
         unset($metadata[$from]);
@@ -515,6 +547,7 @@ class GoogleSheetsDatabase
         $this->persistMetadata($metadata);
         $this->forgetTableCache($from);
         $this->forgetTableCache($to);
+        $this->syncDatabaseIndexSheet();
 
         return $to;
     }
@@ -522,24 +555,25 @@ class GoogleSheetsDatabase
     private function dropTable(string $table): void
     {
         $logical = $this->normalizeTableName($table);
-        $this->transport->deleteSheet($this->mapPhysicalTable($logical));
+        $this->deleteSheet($this->mapPhysicalTable($logical));
 
         $metadata = $this->loadMetadata();
         unset($metadata[$logical]);
         $this->persistMetadata($metadata);
         $this->forgetTableCache($logical);
+        $this->syncDatabaseIndexSheet();
     }
 
     private function ensureMetadataSheetInitialized(): void
     {
-        if (! isset($this->transport->listSheets()[$this->schemaSheet])) {
-            $this->transport->createSheet($this->schemaSheet, true);
+        if (! isset($this->listSheets()[$this->schemaSheet])) {
+            $this->createSheet($this->schemaSheet, true);
         }
 
-        $this->transport->setSheetHidden($this->schemaSheet, true);
+        $this->setSheetHidden($this->schemaSheet, true);
 
-        if ($this->transport->getSheetValues($this->schemaSheet) === []) {
-            $this->transport->setSheetValues($this->schemaSheet, [
+        if ($this->getSheetValues($this->schemaSheet) === []) {
+            $this->setSheetValues($this->schemaSheet, [
                 ['table', 'columns', 'next_id', 'hidden'],
             ]);
         }
@@ -556,11 +590,11 @@ class GoogleSheetsDatabase
             return $metadata;
         }
 
-        if (! isset($this->transport->listSheets()[$this->schemaSheet])) {
+        if (! isset($this->listSheets()[$this->schemaSheet])) {
             return [];
         }
 
-        $values = $this->transport->getSheetValues($this->schemaSheet);
+        $values = $this->getSheetValues($this->schemaSheet);
 
         if ($values === []) {
             return [];
@@ -600,27 +634,38 @@ class GoogleSheetsDatabase
             $rows[] = array_values($schema->toMetadataRow());
         }
 
-        $this->transport->setSheetValues($this->schemaSheet, $rows);
+        $this->setSheetValues($this->schemaSheet, $rows);
         $this->forgetMetadataCache();
     }
 
     private function getTableSchema(string $table): ?TableSchema
     {
         $logical = $this->normalizeTableName($table);
-        $metadata = $this->loadMetadata();
 
-        if (isset($metadata[$logical])) {
-            return $metadata[$logical];
-        }
-
-        $physical = $this->mapPhysicalTable($logical);
-        $sheets = $this->transport->listSheets();
-
-        if (! isset($sheets[$physical])) {
+        if ($this->isNonTableSheet($logical)) {
             return null;
         }
 
-        $values = $this->transport->getSheetValues($physical);
+        $metadata = $this->loadMetadata();
+        $physicalExists = $this->physicalTableExists($logical);
+
+        if (isset($metadata[$logical])) {
+            if (! $physicalExists) {
+                $this->removeStaleMetadataEntry($logical, $metadata);
+
+                return null;
+            }
+
+            return $metadata[$logical];
+        }
+
+        if (! $physicalExists) {
+            return null;
+        }
+
+        $physical = $this->mapPhysicalTable($logical);
+        $sheets = $this->listSheets();
+        $values = $this->getSheetValues($physical);
 
         if ($values === []) {
             return null;
@@ -683,22 +728,11 @@ class GoogleSheetsDatabase
             throw new GoogleSheetsException(sprintf('Table [%s] contains duplicate column names.', $table));
         }
 
-        if (! in_array('id', $names, true)) {
-            throw new GoogleSheetsException(sprintf('Table [%s] must contain an [id] column.', $table));
-        }
     }
 
     private function columnFromDefinition(ColumnDefinition $definition): ColumnSchema
     {
         $type = $this->normalizeColumnType((string) $definition->type, (bool) ($definition->autoIncrement ?? false), (string) $definition->name);
-
-        if (isset($definition->primary) || isset($definition->unique) || isset($definition->index)) {
-            throw new UnsupportedSheetsOperation('Indexes and unique constraints are not supported by the google-sheets driver.');
-        }
-
-        if (isset($definition->foreign)) {
-            throw new UnsupportedSheetsOperation('Foreign keys are not supported by the google-sheets driver.');
-        }
 
         return new ColumnSchema(
             (string) $definition->name,
@@ -1310,14 +1344,15 @@ class GoogleSheetsDatabase
 
     private function resolveCache(): ?CacheRepository
     {
-        if ($this->cacheTtl === 0 || ! $this->container->bound(CacheFactory::class)) {
+        $store = $this->config['cache_store'] ?? null;
+
+        if ($this->cacheTtl === 0 || $store === null || $store === '' || ! $this->container->bound(CacheFactory::class)) {
             return null;
         }
 
         $factory = $this->container->make(CacheFactory::class);
-        $store = $this->config['cache_store'] ?? null;
 
-        return $store ? $factory->store((string) $store) : $factory->store();
+        return $factory->store((string) $store);
     }
 
     private function cacheKey(string $suffix): string
@@ -1342,5 +1377,108 @@ class GoogleSheetsDatabase
     private function forgetTableCache(string $table): void
     {
         $this->cache?->forget($this->cacheKey('table:'.$this->normalizeTableName($table)));
+    }
+
+    private function syncDatabaseIndexSheet(): void
+    {
+        $entries = [];
+
+        foreach ($this->listSheets() as $title => $properties) {
+            if ($this->isNonTableSheet($title) || (bool) ($properties['hidden'] ?? false)) {
+                continue;
+            }
+
+            $entries[] = [
+                'title' => $title,
+                'sheetId' => $properties['sheetId'],
+            ];
+        }
+
+        $this->transport->renderDatabaseIndexSheet(self::DATABASE_INDEX_SHEET, $entries);
+        $this->sheetDirectoryCache = null;
+    }
+
+    private function isNonTableSheet(string $title): bool
+    {
+        return in_array($title, [
+            $this->schemaSheet,
+            $this->migrationsSheet,
+            self::DATABASE_INDEX_SHEET,
+        ], true);
+    }
+
+    private function physicalTableExists(string $table): bool
+    {
+        return isset($this->listSheets()[$this->mapPhysicalTable($table)]);
+    }
+
+    /**
+     * @param  array<string, TableSchema>  $metadata
+     */
+    private function removeStaleMetadataEntry(string $table, array $metadata): void
+    {
+        if (! isset($metadata[$table])) {
+            return;
+        }
+
+        unset($metadata[$table]);
+        $this->persistMetadata($metadata);
+        $this->forgetTableCache($table);
+    }
+
+    /**
+     * @return array<string, array{hidden: bool, sheetId: int|null}>
+     */
+    private function listSheets(): array
+    {
+        return $this->sheetDirectoryCache ??= $this->transport->listSheets();
+    }
+
+    /**
+     * @return array<int, array<int, mixed>>
+     */
+    private function getSheetValues(string $title): array
+    {
+        return $this->sheetValuesCache[$title] ??= $this->transport->getSheetValues($title);
+    }
+
+    /**
+     * @param  array<int, array<int, mixed>>  $rows
+     */
+    private function setSheetValues(string $title, array $rows): void
+    {
+        $this->transport->setSheetValues($title, $rows);
+        $this->sheetValuesCache[$title] = $rows;
+    }
+
+    private function createSheet(string $title, bool $hidden = false): void
+    {
+        $this->transport->createSheet($title, $hidden);
+        $this->sheetDirectoryCache = null;
+        $this->sheetValuesCache[$title] = [];
+    }
+
+    private function deleteSheet(string $title): void
+    {
+        $this->transport->deleteSheet($title);
+        $this->sheetDirectoryCache = null;
+        unset($this->sheetValuesCache[$title]);
+    }
+
+    private function renameSheet(string $from, string $to): void
+    {
+        $this->transport->renameSheet($from, $to);
+        $this->sheetDirectoryCache = null;
+
+        if (array_key_exists($from, $this->sheetValuesCache)) {
+            $this->sheetValuesCache[$to] = $this->sheetValuesCache[$from];
+            unset($this->sheetValuesCache[$from]);
+        }
+    }
+
+    private function setSheetHidden(string $title, bool $hidden): void
+    {
+        $this->transport->setSheetHidden($title, $hidden);
+        $this->sheetDirectoryCache = null;
     }
 }

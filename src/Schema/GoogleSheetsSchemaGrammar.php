@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL\Schema;
+namespace AmazingBV\GoogleSheetsDatabaseDriver\Schema;
 
 use Illuminate\Database\Schema\Grammars\Grammar;
 

@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL\Tests\Feature;
+namespace AmazingBV\GoogleSheetsDatabaseDriver\Tests\Feature;
 
-use AmazingNL\GoogleSheetsDBAL\Tests\Support\InMemorySheetsTransport;
-use AmazingNL\GoogleSheetsDBAL\Tests\TestCase;
+use AmazingBV\GoogleSheetsDatabaseDriver\Tests\Support\InMemorySheetsTransport;
+use AmazingBV\GoogleSheetsDatabaseDriver\Tests\TestCase;
 use Illuminate\Support\Facades\Schema;
 
 class SheetsInstallCommandTest extends TestCase
@@ -32,5 +32,21 @@ class SheetsInstallCommandTest extends TestCase
         $this->assertTrue($snapshot['__sheetsdbal_migrations']['hidden']);
         $this->assertTrue(Schema::connection('google-sheets')->hasTable('contacts'));
         $this->assertSame(['id', 'name'], Schema::connection('google-sheets')->getColumnListing('contacts'));
+    }
+
+    public function test_install_command_does_not_resolve_the_default_cache_store_when_no_store_is_configured(): void
+    {
+        config()->set('database.connections.google-sheets.cache_store', null);
+        config()->set('cache.default', 'database');
+        config()->set('cache.stores.database', [
+            'driver' => 'database',
+            'connection' => 'google-sheets',
+            'table' => 'cache',
+        ]);
+
+        $this->artisan('sheets:install')
+            ->assertSuccessful();
+
+        $this->assertTrue(Schema::connection('google-sheets')->hasTable('migrations'));
     }
 }

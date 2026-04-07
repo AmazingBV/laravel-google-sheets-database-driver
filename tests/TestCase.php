@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL\Tests;
+namespace AmazingBV\GoogleSheetsDatabaseDriver\Tests;
 
-use AmazingNL\GoogleSheetsDBAL\GoogleSheetsServiceProvider;
-use AmazingNL\GoogleSheetsDBAL\Tests\Support\InMemorySheetsTransport;
+use AmazingBV\GoogleSheetsDatabaseDriver\GoogleSheetsDatabaseDriverServiceProvider;
+use AmazingBV\GoogleSheetsDatabaseDriver\Tests\Support\InMemorySheetsTransport;
 use Illuminate\Support\Facades\DB;
 use Orchestra\Testbench\TestCase as Orchestra;
 
@@ -22,7 +22,7 @@ abstract class TestCase extends Orchestra
     protected function getPackageProviders($app): array
     {
         return [
-            GoogleSheetsServiceProvider::class,
+            GoogleSheetsDatabaseDriverServiceProvider::class,
         ];
     }
 

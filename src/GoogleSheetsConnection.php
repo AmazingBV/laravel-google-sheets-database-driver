@@ -2,16 +2,17 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL;
+namespace AmazingBV\GoogleSheetsDatabaseDriver;
 
-use AmazingNL\GoogleSheetsDBAL\Exceptions\UnsupportedSheetsOperation;
-use AmazingNL\GoogleSheetsDBAL\Query\GoogleSheetsBuilder;
-use AmazingNL\GoogleSheetsDBAL\Schema\GoogleSheetsSchemaBuilder;
-use AmazingNL\GoogleSheetsDBAL\Schema\GoogleSheetsSchemaGrammar;
+use AmazingBV\GoogleSheetsDatabaseDriver\Exceptions\UnsupportedSheetsOperation;
+use AmazingBV\GoogleSheetsDatabaseDriver\Query\GoogleSheetsBuilder;
+use AmazingBV\GoogleSheetsDatabaseDriver\Schema\GoogleSheetsSchemaBuilder;
+use AmazingBV\GoogleSheetsDatabaseDriver\Schema\GoogleSheetsSchemaGrammar;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Grammars\Grammar as QueryGrammar;
 use Illuminate\Database\Query\Processors\Processor;
+use Throwable;
 
 class GoogleSheetsConnection extends Connection
 {
@@ -74,22 +75,75 @@ class GoogleSheetsConnection extends Connection
 
     public function beginTransaction(): void
     {
-        throw new UnsupportedSheetsOperation('Transactions are not supported by the google-sheets driver.');
+        foreach ($this->beforeStartingTransaction as $callback) {
+            $callback($this);
+        }
+
+        $this->transactions++;
+
+        $this->transactionsManager?->begin(
+            $this->getName(),
+            $this->transactions
+        );
+
+        $this->fireConnectionEvent('beganTransaction');
     }
 
     public function commit(): void
     {
-        throw new UnsupportedSheetsOperation('Transactions are not supported by the google-sheets driver.');
+        [$levelBeingCommitted, $this->transactions] = [
+            $this->transactions,
+            max(0, $this->transactions - 1),
+        ];
+
+        $this->transactionsManager?->commit(
+            $this->getName(),
+            $levelBeingCommitted,
+            $this->transactions
+        );
+
+        $this->fireConnectionEvent('committed');
     }
 
     public function rollBack($toLevel = null): void
     {
-        throw new UnsupportedSheetsOperation('Transactions are not supported by the google-sheets driver.');
+        $toLevel = is_null($toLevel)
+            ? $this->transactions - 1
+            : $toLevel;
+
+        if ($toLevel < 0 || $toLevel >= $this->transactions) {
+            return;
+        }
+
+        $this->transactions = $toLevel;
+
+        $this->transactionsManager?->rollback(
+            $this->getName(),
+            $this->transactions
+        );
+
+        $this->fireConnectionEvent('rollingBack');
     }
 
     public function transaction(\Closure $callback, $attempts = 1)
     {
-        throw new UnsupportedSheetsOperation('Transactions are not supported by the google-sheets driver.');
+        for ($currentAttempt = 1; $currentAttempt <= $attempts; $currentAttempt++) {
+            $this->beginTransaction();
+
+            try {
+                $result = $callback($this);
+            } catch (Throwable $exception) {
+                $this->rollBack();
+
+                throw $exception;
+            }
+
+            $this->commit();
+
+            return $result;
+        }
+
+        return null;
     }
 
     protected function getDefaultQueryGrammar(): QueryGrammar

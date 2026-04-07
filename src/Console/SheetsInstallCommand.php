@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL\Console;
+namespace AmazingBV\GoogleSheetsDatabaseDriver\Console;
 
-use AmazingNL\GoogleSheetsDBAL\GoogleSheetsConnection;
+use AmazingBV\GoogleSheetsDatabaseDriver\GoogleSheetsConnection;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 

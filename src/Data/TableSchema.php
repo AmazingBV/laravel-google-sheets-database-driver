@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL\Data;
+namespace AmazingBV\GoogleSheetsDatabaseDriver\Data;
 
 use Illuminate\Support\Collection;
 

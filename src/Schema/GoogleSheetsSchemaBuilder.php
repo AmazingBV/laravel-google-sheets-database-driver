@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL\Schema;
+namespace AmazingBV\GoogleSheetsDatabaseDriver\Schema;
 
-use AmazingNL\GoogleSheetsDBAL\GoogleSheetsDatabase;
+use AmazingBV\GoogleSheetsDatabaseDriver\GoogleSheetsDatabase;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Builder as SchemaBuilder;
 

@@ -2,10 +2,9 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL\Tests\Feature;
+namespace AmazingBV\GoogleSheetsDatabaseDriver\Tests\Feature;
 
-use AmazingNL\GoogleSheetsDBAL\Exceptions\UnsupportedSheetsOperation;
-use AmazingNL\GoogleSheetsDBAL\Tests\TestCase;
+use AmazingBV\GoogleSheetsDatabaseDriver\Tests\TestCase;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Schema\Blueprint;
@@ -39,11 +38,36 @@ class EloquentAndUnsupportedOperationsTest extends TestCase
         $this->assertSame(1, Flight::withTrashed()->count());
     }
 
-    public function test_transactions_throw_a_clear_exception(): void
+    public function test_transactions_are_ignored_as_no_op_control_flow(): void
     {
-        $this->expectException(UnsupportedSheetsOperation::class);
+        $connection = DB::connection('google-sheets');
+        $called = false;
 
-        DB::connection('google-sheets')->transaction(static fn () => null);
+        $result = $connection->transaction(function () use (&$called) {
+            $called = true;
+
+            return 'ok';
+        });
+
+        $this->assertTrue($called);
+        $this->assertSame('ok', $result);
+        $this->assertSame(0, $connection->transactionLevel());
+    }
+
+    public function test_transaction_rolls_back_its_no_op_level_when_callback_throws(): void
+    {
+        $connection = DB::connection('google-sheets');
+
+        try {
+            $connection->transaction(static function (): void {
+                throw new \RuntimeException('boom');
+            });
+            $this->fail('Expected RuntimeException was not thrown.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('boom', $exception->getMessage());
+        }
+
+        $this->assertSame(0, $connection->transactionLevel());
     }
 }
 

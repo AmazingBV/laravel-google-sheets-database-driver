@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL\Tests\Feature;
+namespace AmazingBV\GoogleSheetsDatabaseDriver\Tests\Feature;
 
-use AmazingNL\GoogleSheetsDBAL\Tests\TestCase;
+use AmazingBV\GoogleSheetsDatabaseDriver\Tests\TestCase;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;

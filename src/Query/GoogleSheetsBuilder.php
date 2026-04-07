@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace AmazingNL\GoogleSheetsDBAL\Query;
+namespace AmazingBV\GoogleSheetsDatabaseDriver\Query;
 
-use AmazingNL\GoogleSheetsDBAL\GoogleSheetsDatabase;
+use AmazingBV\GoogleSheetsDatabaseDriver\GoogleSheetsDatabase;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder;
 

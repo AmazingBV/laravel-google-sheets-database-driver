@@ -3,6 +3,8 @@
 # Laravel Google Sheets Database Driver
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/amazingbv/laravel-google-sheets-database-driver.svg?style=flat-square)](https://packagist.org/packages/amazingbv/laravel-google-sheets-database-driver)
+[![Tests](https://img.shields.io/github/actions/workflow/status/amazingbv/laravel-google-sheets-database-driver/tests.yml?branch=main&label=Tests&style=flat-square)](https://github.com/amazingbv/laravel-google-sheets-database-driver/actions/workflows/tests.yml)
+[![Downloads](https://img.shields.io/packagist/dt/amazingbv/laravel-google-sheets-database-driver.svg?style=flat-square)](https://packagist.org/packages/amazingbv/laravel-google-sheets-database-driver)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 A Laravel database driver that uses a Google Sheets spreadsheet as its backing store.

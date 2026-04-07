@@ -1,5 +1,7 @@
 # Laravel Google Sheets Database Driver
 
+<img src="assets/header.png" alt="Laravel Google Sheets Database Driver header" width="100%" />
+
 A Laravel database driver that uses a Google Sheets spreadsheet as its backing store.
 
 This package lets you treat:

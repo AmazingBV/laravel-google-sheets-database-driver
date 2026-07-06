@@ -37,6 +37,8 @@ abstract class TestCase extends Orchestra
             'database' => 'spreadsheet-test',
             'cache_store' => 'array',
             'cache_ttl' => 60,
+            'lock_ttl_seconds' => 30,
+            'lock_wait_seconds' => 0,
             'schema_sheet' => '__sheetsdbal_schema',
             'migrations_table' => 'migrations',
             'migrations_sheet' => '__sheetsdbal_migrations',

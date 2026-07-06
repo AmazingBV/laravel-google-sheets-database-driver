@@ -12,6 +12,8 @@ return [
         'credentials_path' => env('GOOGLE_SHEETS_CREDENTIALS_PATH'),
         'cache_store' => env('GOOGLE_SHEETS_CACHE_STORE'),
         'cache_ttl' => (int) env('GOOGLE_SHEETS_CACHE_TTL', 60),
+        'lock_ttl_seconds' => (int) env('GOOGLE_SHEETS_LOCK_TTL_SECONDS', 30),
+        'lock_wait_seconds' => (int) env('GOOGLE_SHEETS_LOCK_WAIT_SECONDS', 10),
         'quota_retry_attempts' => (int) env('GOOGLE_SHEETS_QUOTA_RETRY_ATTEMPTS', 5),
         'quota_retry_base_delay_ms' => (int) env('GOOGLE_SHEETS_QUOTA_RETRY_BASE_DELAY_MS', 1000),
         'quota_retry_max_delay_ms' => (int) env('GOOGLE_SHEETS_QUOTA_RETRY_MAX_DELAY_MS', 10000),

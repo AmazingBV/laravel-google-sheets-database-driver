@@ -12,6 +12,7 @@ use AmazingBV\GoogleSheetsDatabaseDriver\Exceptions\GoogleSheetsException;
 use AmazingBV\GoogleSheetsDatabaseDriver\Exceptions\SchemaMismatchException;
 use AmazingBV\GoogleSheetsDatabaseDriver\Exceptions\UnsupportedSheetsOperation;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
+use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Query\Builder;
@@ -44,6 +45,10 @@ class GoogleSheetsDatabase
 
     private readonly int $cacheTtl;
 
+    private readonly int $lockTtlSeconds;
+
+    private readonly int $lockWaitSeconds;
+
     /**
      * @var array<string, array{hidden: bool, sheetId: int|null}>|null
      */
@@ -64,6 +69,8 @@ class GoogleSheetsDatabase
         $this->migrationsTable = (string) ($config['migrations_table'] ?? 'migrations');
         $this->migrationsSheet = (string) ($config['migrations_sheet'] ?? '__sheetsdbal_migrations');
         $this->cacheTtl = max(0, (int) ($config['cache_ttl'] ?? 0));
+        $this->lockTtlSeconds = max(1, (int) ($config['lock_ttl_seconds'] ?? 30));
+        $this->lockWaitSeconds = max(0, (int) ($config['lock_wait_seconds'] ?? 10));
 
         if ($this->spreadsheetId === '') {
             throw new ConfigurationException('DB_DATABASE must contain the target Google Spreadsheet ID.');
@@ -193,36 +200,38 @@ class GoogleSheetsDatabase
 
     public function applyBlueprint(Blueprint $blueprint): void
     {
-        $table = $this->normalizeTableName($blueprint->getTable());
+        $this->withTableLock((string) $blueprint->getTable(), function () use ($blueprint): void {
+            $table = $this->normalizeTableName($blueprint->getTable());
 
-        if ($blueprint->creating()) {
-            $this->createTableInternal(
-                $table,
-                array_map(fn (ColumnDefinition $column): ColumnSchema => $this->columnFromDefinition($column), $blueprint->getColumns()),
-                $table === $this->migrationsTable
-            );
+            if ($blueprint->creating()) {
+                $this->createTableInternal(
+                    $table,
+                    array_map(fn (ColumnDefinition $column): ColumnSchema => $this->columnFromDefinition($column), $blueprint->getColumns()),
+                    $table === $this->migrationsTable
+                );
 
-            return;
-        }
-
-        foreach ($blueprint->getCommands() as $command) {
-            if ($command instanceof ColumnDefinition) {
-                $this->addColumn($table, $command);
-
-                continue;
+                return;
             }
 
-            match ($command->name) {
-                'rename' => $table = $this->renameTable($table, (string) $command->to),
-                'drop' => $this->dropTable($table),
-                'dropIfExists' => $this->hasTable($table) ? $this->dropTable($table) : null,
-                'renameColumn' => $this->renameColumn($table, (string) $command->from, (string) $command->to),
-                'dropColumn' => $this->dropColumns($table, Arr::wrap($command->columns)),
-                'primary', 'index', 'unique', 'foreign', 'dropPrimary', 'dropIndex', 'dropUnique', 'dropForeign', 'renameIndex',
-                'fulltext', 'fullText', 'spatialIndex', 'vectorIndex', 'dropFullText', 'dropSpatialIndex', 'dropVectorIndex' => null,
-                default => null,
-            };
-        }
+            foreach ($blueprint->getCommands() as $command) {
+                if ($command instanceof ColumnDefinition) {
+                    $this->addColumn($table, $command);
+
+                    continue;
+                }
+
+                match ($command->name) {
+                    'rename' => $table = $this->renameTable($table, (string) $command->to),
+                    'drop' => $this->dropTable($table),
+                    'dropIfExists' => $this->hasTable($table) ? $this->dropTable($table) : null,
+                    'renameColumn' => $this->renameColumn($table, (string) $command->from, (string) $command->to),
+                    'dropColumn' => $this->dropColumns($table, Arr::wrap($command->columns)),
+                    'primary', 'index', 'unique', 'foreign', 'dropPrimary', 'dropIndex', 'dropUnique', 'dropForeign', 'renameIndex',
+                    'fulltext', 'fullText', 'spatialIndex', 'vectorIndex', 'dropFullText', 'dropSpatialIndex', 'dropVectorIndex' => null,
+                    default => null,
+                };
+            }
+        });
     }
 
     /**
@@ -248,83 +257,93 @@ class GoogleSheetsDatabase
 
     public function insert(Builder $query, array $values): bool
     {
-        $rowsToInsert = $this->normalizeInsertPayload($values);
-        $snapshot = $this->loadTableSnapshot((string) $query->from);
-        $schema = $snapshot['schema'];
-        $rows = $snapshot['rows'];
+        return $this->withTableLock((string) $query->from, function () use ($query, $values): bool {
+            $rowsToInsert = $this->normalizeInsertPayload($values);
+            $snapshot = $this->loadTableSnapshot((string) $query->from);
+            $schema = $snapshot['schema'];
+            $rows = $snapshot['rows'];
 
-        foreach ($rowsToInsert as $row) {
-            $prepared = $this->prepareInsertRow($schema, $row);
-            $rows[] = $prepared['row'];
-            $schema = $prepared['schema'];
-        }
+            foreach ($rowsToInsert as $row) {
+                $prepared = $this->prepareInsertRow($schema, $row);
+                $rows[] = $prepared['row'];
+                $schema = $prepared['schema'];
+            }
 
-        $this->writeTable($schema, $rows);
+            $this->writeTable($schema, $rows);
 
-        return true;
+            return true;
+        });
     }
 
     public function insertGetId(Builder $query, array $values, mixed $sequence = null): int|string
     {
-        $snapshot = $this->loadTableSnapshot((string) $query->from);
-        $prepared = $this->prepareInsertRow($snapshot['schema'], $values);
+        return $this->withTableLock((string) $query->from, function () use ($query, $values, $sequence): int|string {
+            $snapshot = $this->loadTableSnapshot((string) $query->from);
+            $prepared = $this->prepareInsertRow($snapshot['schema'], $values);
 
-        $snapshot['rows'][] = $prepared['row'];
-        $this->writeTable($prepared['schema'], $snapshot['rows']);
+            $snapshot['rows'][] = $prepared['row'];
+            $this->writeTable($prepared['schema'], $snapshot['rows']);
 
-        return $prepared['row'][$sequence ?? 'id'] ?? throw new GoogleSheetsException('Unable to determine the inserted record ID.');
+            return $prepared['row'][$sequence ?? 'id'] ?? throw new GoogleSheetsException('Unable to determine the inserted record ID.');
+        });
     }
 
     public function update(Builder $query, array $values): int
     {
-        $this->assertMutatingQuerySupported($query);
+        return $this->withTableLock((string) $query->from, function () use ($query, $values): int {
+            $this->assertMutatingQuerySupported($query);
 
-        $snapshot = $this->loadTableSnapshot((string) $query->from);
-        $schema = $snapshot['schema'];
-        $rows = $snapshot['rows'];
-        $indexes = $this->matchingRowIndexes($rows, $query);
-        $normalized = $this->normalizeWriteValues($values, $schema->table);
+            $snapshot = $this->loadTableSnapshot((string) $query->from);
+            $schema = $snapshot['schema'];
+            $rows = $snapshot['rows'];
+            $indexes = $this->matchingRowIndexes($rows, $query);
+            $normalized = $this->normalizeWriteValues($values, $schema->table);
 
-        foreach ($indexes as $index) {
-            foreach ($normalized as $column => $value) {
-                $schema->requireColumn($column);
-                $rows[$index][$column] = $this->normalizeValueForStorage($value, $schema->requireColumn($column));
+            foreach ($indexes as $index) {
+                foreach ($normalized as $column => $value) {
+                    $schema->requireColumn($column);
+                    $rows[$index][$column] = $this->normalizeValueForStorage($value, $schema->requireColumn($column));
+                }
+
+                if ($schema->hasColumn('updated_at') && ! array_key_exists('updated_at', $normalized)) {
+                    $rows[$index]['updated_at'] = Carbon::now()->format('Y-m-d H:i:s');
+                }
             }
 
-            if ($schema->hasColumn('updated_at') && ! array_key_exists('updated_at', $normalized)) {
-                $rows[$index]['updated_at'] = Carbon::now()->format('Y-m-d H:i:s');
-            }
-        }
+            $this->writeTable($schema, $rows);
 
-        $this->writeTable($schema, $rows);
-
-        return count($indexes);
+            return count($indexes);
+        });
     }
 
     public function delete(Builder $query): int
     {
-        $this->assertMutatingQuerySupported($query);
+        return $this->withTableLock((string) $query->from, function () use ($query): int {
+            $this->assertMutatingQuerySupported($query);
 
-        $snapshot = $this->loadTableSnapshot((string) $query->from);
-        $rows = $snapshot['rows'];
-        $indexes = array_flip($this->matchingRowIndexes($rows, $query));
+            $snapshot = $this->loadTableSnapshot((string) $query->from);
+            $rows = $snapshot['rows'];
+            $indexes = array_flip($this->matchingRowIndexes($rows, $query));
 
-        $remaining = array_values(array_filter(
-            $rows,
-            static fn (array $row, int $index): bool => ! isset($indexes[$index]),
-            ARRAY_FILTER_USE_BOTH
-        ));
+            $remaining = array_values(array_filter(
+                $rows,
+                static fn (array $row, int $index): bool => ! isset($indexes[$index]),
+                ARRAY_FILTER_USE_BOTH
+            ));
 
-        $this->writeTable($snapshot['schema'], $remaining);
+            $this->writeTable($snapshot['schema'], $remaining);
 
-        return count($indexes);
+            return count($indexes);
+        });
     }
 
     public function truncate(Builder $query): void
     {
-        $snapshot = $this->loadTableSnapshot((string) $query->from);
+        $this->withTableLock((string) $query->from, function () use ($query): void {
+            $snapshot = $this->loadTableSnapshot((string) $query->from);
 
-        $this->writeTable($snapshot['schema']->withNextId(1), []);
+            $this->writeTable($snapshot['schema']->withNextId(1), []);
+        });
     }
 
     /**
@@ -1353,6 +1372,29 @@ class GoogleSheetsDatabase
         $factory = $this->container->make(CacheFactory::class);
 
         return $factory->store((string) $store);
+    }
+
+    /**
+     * @template T
+     *
+     * @param  callable(): T  $callback
+     * @return T
+     */
+    private function withTableLock(string $table, callable $callback): mixed
+    {
+        if ($this->cache === null) {
+            return $callback();
+        }
+
+        $store = $this->cache->getStore();
+
+        if (! $store instanceof LockProvider) {
+            return $callback();
+        }
+
+        return $store
+            ->lock($this->cacheKey('lock:'.$this->normalizeTableName($table)), $this->lockTtlSeconds)
+            ->block($this->lockWaitSeconds, $callback);
     }
 
     private function cacheKey(string $suffix): string

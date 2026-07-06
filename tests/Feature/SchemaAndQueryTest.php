@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace AmazingBV\GoogleSheetsDatabaseDriver\Tests\Feature;
 
 use AmazingBV\GoogleSheetsDatabaseDriver\Tests\TestCase;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -63,5 +65,29 @@ class SchemaAndQueryTest extends TestCase
         });
 
         $this->assertSame(['id', 'name', 'age', 'is_active', 'created_at', 'updated_at', 'deleted_at', 'display_name'], Schema::connection('google-sheets')->getColumnListing('users'));
+    }
+
+    public function test_mutations_are_serialized_with_table_locks(): void
+    {
+        Schema::connection('google-sheets')->create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+        });
+
+        $lock = Cache::store('array')
+            ->getStore()
+            ->lock('google-sheets-dbal:spreadsheet-test:lock:users', 30);
+
+        $this->assertTrue($lock->get());
+
+        try {
+            $this->expectException(LockTimeoutException::class);
+
+            DB::connection('google-sheets')->table('users')->insert([
+                'name' => 'Taylor',
+            ]);
+        } finally {
+            $lock->release();
+        }
     }
 }

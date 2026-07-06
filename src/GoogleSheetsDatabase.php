@@ -190,7 +190,7 @@ class GoogleSheetsDatabase
             return true;
         }
 
-        return $physicalExists;
+        return $this->getTableSchema($logical) !== null;
     }
 
     public function getColumnListing(string $table): array

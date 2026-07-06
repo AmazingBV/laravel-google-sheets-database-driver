@@ -61,6 +61,31 @@ class QuotaAwarenessTest extends TestCase
         $this->assertSame(['key', 'value'], Schema::connection('google-sheets')->getColumnListing('cache'));
     }
 
+    public function test_empty_physical_tabs_are_not_reported_as_valid_tables(): void
+    {
+        InMemorySheetsTransport::seed('spreadsheet-test', [
+            'empty' => [
+                'rows' => [],
+            ],
+            '__sheetsdbal_migrations' => [
+                'hidden' => true,
+                'rows' => [],
+            ],
+        ]);
+
+        $database = DB::connection('google-sheets')->getGoogleSheetsDatabase();
+
+        $this->assertFalse($database->hasTable('empty'));
+        $this->assertFalse($database->hasTable('migrations'));
+
+        $database->ensureSystemSheets();
+
+        $snapshot = InMemorySheetsTransport::snapshot('spreadsheet-test');
+
+        $this->assertTrue($database->hasTable('migrations'));
+        $this->assertSame(['id', 'migration', 'batch'], $snapshot['__sheetsdbal_migrations']['rows'][0]);
+    }
+
     public function test_stale_create_table_migration_log_is_pruned_so_migrate_recreates_missing_tabs(): void
     {
         InMemorySheetsTransport::seed('spreadsheet-test', [

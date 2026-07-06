@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AmazingBV\GoogleSheetsDatabaseDriver\Tests\Feature;
 
+use AmazingBV\GoogleSheetsDatabaseDriver\Exceptions\UnsupportedSheetsOperation;
 use AmazingBV\GoogleSheetsDatabaseDriver\Tests\TestCase;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Database\Schema\Blueprint;
@@ -152,5 +153,20 @@ class SchemaAndQueryTest extends TestCase
         $this->assertSame(3, $query->count());
         $this->assertSame(60, (int) $query->sum('points'));
         $this->assertSame(20.0, (float) $query->avg('points'));
+    }
+
+    public function test_unsupported_schema_changes_fail_explicitly(): void
+    {
+        Schema::connection('google-sheets')->create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name')->index();
+        });
+
+        $this->expectException(UnsupportedSheetsOperation::class);
+        $this->expectExceptionMessage('Changing existing column definitions is not supported');
+
+        Schema::connection('google-sheets')->table('users', function (Blueprint $table): void {
+            $table->string('name', 100)->change();
+        });
     }
 }

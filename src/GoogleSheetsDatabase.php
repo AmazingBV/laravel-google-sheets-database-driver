@@ -213,6 +213,10 @@ class GoogleSheetsDatabase
                 return;
             }
 
+            if (method_exists($blueprint, 'getChangedColumns') && $blueprint->getChangedColumns() !== []) {
+                throw new UnsupportedSheetsOperation('Changing existing column definitions is not supported by the google-sheets driver.');
+            }
+
             foreach ($blueprint->getCommands() as $command) {
                 if ($command instanceof ColumnDefinition) {
                     $this->addColumn($table, $command);
@@ -228,7 +232,7 @@ class GoogleSheetsDatabase
                     'dropColumn' => $this->dropColumns($table, Arr::wrap($command->columns)),
                     'primary', 'index', 'unique', 'foreign', 'dropPrimary', 'dropIndex', 'dropUnique', 'dropForeign', 'renameIndex',
                     'fulltext', 'fullText', 'spatialIndex', 'vectorIndex', 'dropFullText', 'dropSpatialIndex', 'dropVectorIndex' => null,
-                    default => null,
+                    default => throw new UnsupportedSheetsOperation(sprintf('Schema command [%s] is not supported by the google-sheets driver.', $command->name ?? 'unknown')),
                 };
             }
         });

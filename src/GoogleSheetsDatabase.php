@@ -244,12 +244,12 @@ class GoogleSheetsDatabase
         $rows = $this->buildJoinedRows($query);
         $rows = array_values(array_filter($rows, fn (array $row): bool => $this->rowMatches($query->wheres ?? [], $row, (string) $query->from)));
         $rows = $this->applyOrdering($rows, $query);
-        $rows = $this->applyOffsetAndLimit($rows, $query);
 
         if ($query->aggregate !== null) {
             return [(object) ['aggregate' => $this->calculateAggregate($rows, $query)]];
         }
 
+        $rows = $this->applyOffsetAndLimit($rows, $query);
         $rows = $this->projectRows($rows, $query);
 
         return array_map(static fn (array $row): object => (object) $row, $rows);

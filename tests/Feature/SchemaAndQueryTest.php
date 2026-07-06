@@ -129,4 +129,28 @@ class SchemaAndQueryTest extends TestCase
         $this->assertSame([1, 2], $ungrouped);
         $this->assertSame([2], $grouped);
     }
+
+    public function test_aggregates_are_calculated_before_limit_and_offset_are_applied(): void
+    {
+        Schema::connection('google-sheets')->create('scores', function (Blueprint $table): void {
+            $table->id();
+            $table->integer('points');
+        });
+
+        DB::connection('google-sheets')->table('scores')->insert([
+            ['points' => 10],
+            ['points' => 20],
+            ['points' => 30],
+        ]);
+
+        $query = DB::connection('google-sheets')
+            ->table('scores')
+            ->where('points', '>', 0)
+            ->offset(1)
+            ->limit(1);
+
+        $this->assertSame(3, $query->count());
+        $this->assertSame(60, (int) $query->sum('points'));
+        $this->assertSame(20.0, (float) $query->avg('points'));
+    }
 }

@@ -122,21 +122,9 @@ class GoogleSheetsApiTransport implements SheetsTransport
 
     public function setSheetValues(string $title, array $rows): void
     {
-        $existingRows = $this->sheetValuesCache[$title] ?? null;
-
-        if ($existingRows !== []) {
-            $this->runGoogleOperation(
-                sprintf('Unable to write sheet [%s].', $title),
-                function () use ($title): void {
-                    $this->service->spreadsheets_values->clear(
-                        $this->spreadsheetId,
-                        $this->quotedSheetName($title),
-                        new ClearValuesRequest
-                    );
-                },
-                'write'
-            );
-        }
+        $existingRows = array_key_exists($title, $this->sheetValuesCache)
+            ? $this->sheetValuesCache[$title]
+            : $this->getSheetValues($title);
 
         if ($rows !== []) {
             $this->runGoogleOperation(
@@ -156,6 +144,7 @@ class GoogleSheetsApiTransport implements SheetsTransport
             );
         }
 
+        $this->clearStaleCells($title, $existingRows, $rows);
         $this->sheetValuesCache[$title] = $rows;
     }
 
@@ -560,6 +549,66 @@ class GoogleSheetsApiTransport implements SheetsTransport
             $this->quotedSheetName($title),
             $this->columnLetter($columns),
             $rows
+        );
+    }
+
+    /**
+     * @param  array<int, array<int, mixed>>  $existingRows
+     * @param  array<int, array<int, mixed>>  $newRows
+     */
+    private function clearStaleCells(string $title, array $existingRows, array $newRows): void
+    {
+        $oldRows = count($existingRows);
+        $oldColumns = $this->maxColumnCount($existingRows);
+        $newRowsCount = count($newRows);
+        $newColumns = $this->maxColumnCount($newRows);
+
+        if ($oldRows === 0 || $oldColumns === 0) {
+            return;
+        }
+
+        if ($newRowsCount === 0) {
+            $this->clearRange($title, 1, 1, $oldRows, $oldColumns);
+
+            return;
+        }
+
+        if ($oldRows > $newRowsCount) {
+            $this->clearRange($title, $newRowsCount + 1, 1, $oldRows, $oldColumns);
+        }
+
+        if ($oldColumns > $newColumns) {
+            $this->clearRange($title, 1, $newColumns + 1, max($oldRows, $newRowsCount), $oldColumns);
+        }
+    }
+
+    /**
+     * @param  array<int, array<int, mixed>>  $rows
+     */
+    private function maxColumnCount(array $rows): int
+    {
+        return $rows === [] ? 0 : max(array_map('count', $rows));
+    }
+
+    private function clearRange(string $title, int $startRow, int $startColumn, int $endRow, int $endColumn): void
+    {
+        $this->runGoogleOperation(
+            sprintf('Unable to clear stale cells on sheet [%s].', $title),
+            function () use ($title, $startRow, $startColumn, $endRow, $endColumn): void {
+                $this->service->spreadsheets_values->clear(
+                    $this->spreadsheetId,
+                    sprintf(
+                        '%s!%s%d:%s%d',
+                        $this->quotedSheetName($title),
+                        $this->columnLetter($startColumn),
+                        $startRow,
+                        $this->columnLetter($endColumn),
+                        $endRow
+                    ),
+                    new ClearValuesRequest
+                );
+            },
+            'write'
         );
     }
 

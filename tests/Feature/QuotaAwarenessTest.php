@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AmazingBV\GoogleSheetsDatabaseDriver\Tests\Feature;
 
+use AmazingBV\GoogleSheetsDatabaseDriver\Exceptions\GoogleSheetsException;
 use AmazingBV\GoogleSheetsDatabaseDriver\Tests\Support\InMemorySheetsTransport;
 use AmazingBV\GoogleSheetsDatabaseDriver\Tests\TestCase;
 use Illuminate\Database\Schema\Blueprint;
@@ -83,7 +84,7 @@ class QuotaAwarenessTest extends TestCase
         $snapshot = InMemorySheetsTransport::snapshot('spreadsheet-test');
 
         $this->assertTrue($database->hasTable('migrations'));
-        $this->assertSame(['id', 'migration', 'batch'], $snapshot['__sheetsdbal_migrations']['rows'][0]);
+        $this->assertSame(['id', 'migration', 'batch', 'tables'], $snapshot['__sheetsdbal_migrations']['rows'][0]);
     }
 
     public function test_stale_create_table_migration_log_is_pruned_so_migrate_recreates_missing_tabs(): void
@@ -113,5 +114,40 @@ class QuotaAwarenessTest extends TestCase
 
         $this->assertTrue(Schema::connection('google-sheets')->hasTable('cache'));
         $this->assertSame(['key', 'value', 'expiration'], Schema::connection('google-sheets')->getColumnListing('cache'));
+    }
+
+    public function test_partially_missing_tracked_migration_tables_fail_with_explicit_repair_error(): void
+    {
+        InMemorySheetsTransport::seed('spreadsheet-test', [
+            '__sheetsdbal_schema' => [
+                'hidden' => true,
+                'rows' => [
+                    ['table', 'columns', 'next_id', 'hidden'],
+                    ['migrations', '[{"name":"id","type":"integer","nullable":false,"default":null,"auto_increment":true,"primary":true},{"name":"migration","type":"string","nullable":false,"default":null,"auto_increment":false,"primary":false},{"name":"batch","type":"integer","nullable":false,"default":null,"auto_increment":false,"primary":false},{"name":"tables","type":"json","nullable":true,"default":null,"auto_increment":false,"primary":false}]', 2, true],
+                    ['users', '[{"name":"id","type":"integer","nullable":false,"default":null,"auto_increment":true,"primary":true},{"name":"name","type":"string","nullable":false,"default":null,"auto_increment":false,"primary":false},{"name":"email","type":"string","nullable":false,"default":null,"auto_increment":false,"primary":false},{"name":"password","type":"string","nullable":false,"default":null,"auto_increment":false,"primary":false},{"name":"created_at","type":"timestamp","nullable":true,"default":null,"auto_increment":false,"primary":false},{"name":"updated_at","type":"timestamp","nullable":true,"default":null,"auto_increment":false,"primary":false}]', 1, false],
+                ],
+            ],
+            '__sheetsdbal_migrations' => [
+                'hidden' => true,
+                'rows' => [
+                    ['id', 'migration', 'batch', 'tables'],
+                    [1, '0001_01_01_000000_create_users_table', 1, '["cache","sessions","users"]'],
+                ],
+            ],
+            'users' => [
+                'rows' => [
+                    ['id', 'name', 'email', 'password', 'created_at', 'updated_at'],
+                ],
+            ],
+        ]);
+
+        $this->expectException(GoogleSheetsException::class);
+        $this->expectExceptionMessage('Cannot auto-repair migration [0001_01_01_000000_create_users_table]');
+
+        $this->artisan('migrate', [
+            '--database' => 'google-sheets',
+            '--path' => realpath(__DIR__.'/../Fixtures/default-migrations'),
+            '--realpath' => true,
+        ]);
     }
 }

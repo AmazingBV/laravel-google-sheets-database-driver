@@ -110,17 +110,7 @@ class GoogleSheetsDatabase
             $this->setSheetHidden($this->schemaSheet, true);
         }
 
-        if (! $this->hasTable($this->migrationsTable)) {
-            $this->createTableInternal(
-                $this->migrationsTable,
-                [
-                    new ColumnSchema('id', 'integer', false, null, true, true),
-                    new ColumnSchema('migration', 'string'),
-                    new ColumnSchema('batch', 'integer'),
-                ],
-                true
-            );
-        }
+        $this->ensureMigrationsTable();
 
         $this->syncDatabaseIndexSheet();
     }
@@ -196,6 +186,34 @@ class GoogleSheetsDatabase
     public function getColumnListing(string $table): array
     {
         return $this->getTableSchema($table)?->header() ?? [];
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getTableNames(): array
+    {
+        $tables = [];
+
+        foreach ($this->loadMetadata() as $table => $schema) {
+            if ($this->physicalTableExists($table)) {
+                $tables[] = $table;
+            }
+        }
+
+        foreach ($this->listSheets() as $sheet => $properties) {
+            if ($this->isNonTableSheet($sheet) || in_array($sheet, $tables, true)) {
+                continue;
+            }
+
+            if ($this->getTableSchema($sheet) !== null) {
+                $tables[] = $sheet;
+            }
+        }
+
+        sort($tables);
+
+        return array_values($tables);
     }
 
     public function applyBlueprint(Blueprint $blueprint): void
@@ -459,6 +477,41 @@ class GoogleSheetsDatabase
         $this->persistMetadata($metadata);
         $this->forgetTableCache($logical);
         $this->syncDatabaseIndexSheet();
+    }
+
+    private function ensureMigrationsTable(): void
+    {
+        if (! $this->hasTable($this->migrationsTable)) {
+            $this->createTableInternal(
+                $this->migrationsTable,
+                [
+                    new ColumnSchema('id', 'integer', false, null, true, true),
+                    new ColumnSchema('migration', 'string'),
+                    new ColumnSchema('batch', 'integer'),
+                    new ColumnSchema('tables', 'json', true),
+                ],
+                true
+            );
+
+            return;
+        }
+
+        $snapshot = $this->loadTableSnapshot($this->migrationsTable);
+
+        if ($snapshot['schema']->hasColumn('tables')) {
+            return;
+        }
+
+        $schema = $snapshot['schema']->withColumns([
+            ...$snapshot['schema']->columns,
+            new ColumnSchema('tables', 'json', true),
+        ]);
+
+        foreach ($snapshot['rows'] as &$row) {
+            $row['tables'] = null;
+        }
+
+        $this->writeTable($schema, $snapshot['rows']);
     }
 
     private function addColumn(string $table, ColumnDefinition $definition): void

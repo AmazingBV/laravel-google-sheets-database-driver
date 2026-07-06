@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AmazingBV\GoogleSheetsDatabaseDriver\Tests\Feature;
 
+use AmazingBV\GoogleSheetsDatabaseDriver\Tests\Support\InMemorySheetsTransport;
 use AmazingBV\GoogleSheetsDatabaseDriver\Tests\TestCase;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -75,5 +76,10 @@ class JoinAndMigrationTest extends TestCase
         $this->assertSame(['id', 'name', 'email', 'password', 'created_at', 'updated_at'], Schema::connection('google-sheets')->getColumnListing('users'));
         $this->assertSame(['key', 'value', 'expiration'], Schema::connection('google-sheets')->getColumnListing('cache'));
         $this->assertSame(['id', 'user_id', 'ip_address', 'user_agent', 'payload', 'last_activity'], Schema::connection('google-sheets')->getColumnListing('sessions'));
+
+        $migrationRows = InMemorySheetsTransport::snapshot('spreadsheet-test')['__sheetsdbal_migrations']['rows'];
+
+        $this->assertSame(['id', 'migration', 'batch', 'tables'], $migrationRows[0]);
+        $this->assertSame(['cache', 'sessions', 'users'], json_decode($migrationRows[1][3], true, 512, JSON_THROW_ON_ERROR));
     }
 }

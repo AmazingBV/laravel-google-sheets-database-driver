@@ -169,4 +169,26 @@ class SchemaAndQueryTest extends TestCase
             $table->string('name', 100)->change();
         });
     }
+
+    public function test_raw_ordering_is_rejected_for_mutating_queries(): void
+    {
+        Schema::connection('google-sheets')->create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+        });
+
+        DB::connection('google-sheets')->table('users')->insert([
+            ['name' => 'Taylor'],
+            ['name' => 'Abigail'],
+        ]);
+
+        $this->expectException(UnsupportedSheetsOperation::class);
+        $this->expectExceptionMessage('Raw order clauses are not supported');
+
+        DB::connection('google-sheets')
+            ->table('users')
+            ->orderByRaw('LOWER(name)')
+            ->limit(1)
+            ->update(['name' => 'Changed']);
+    }
 }

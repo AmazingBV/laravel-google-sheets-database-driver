@@ -1394,6 +1394,8 @@ class GoogleSheetsDatabase
 
     private function assertSupportedSelect(Builder $query): void
     {
+        $this->assertSupportedOrderings($query);
+
         if ($query->unions !== null && $query->unions !== []) {
             throw new UnsupportedSheetsOperation('Unions are not supported by the google-sheets driver.');
         }
@@ -1415,8 +1417,19 @@ class GoogleSheetsDatabase
 
     private function assertMutatingQuerySupported(Builder $query): void
     {
+        $this->assertSupportedOrderings($query);
+
         if (! empty($query->joins)) {
             throw new UnsupportedSheetsOperation('Updates and deletes on joined queries are not supported by the google-sheets driver.');
+        }
+    }
+
+    private function assertSupportedOrderings(Builder $query): void
+    {
+        foreach ($query->orders ?? [] as $order) {
+            if (($order['type'] ?? null) === 'Raw') {
+                throw new UnsupportedSheetsOperation('Raw order clauses are not supported by the google-sheets driver.');
+            }
         }
     }
 

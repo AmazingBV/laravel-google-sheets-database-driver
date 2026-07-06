@@ -90,4 +90,43 @@ class SchemaAndQueryTest extends TestCase
             $lock->release();
         }
     }
+
+    public function test_mixed_and_or_wheres_follow_sql_precedence(): void
+    {
+        Schema::connection('google-sheets')->create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('role');
+            $table->boolean('active');
+            $table->string('country');
+        });
+
+        DB::connection('google-sheets')->table('users')->insert([
+            ['role' => 'admin', 'active' => false, 'country' => 'BE'],
+            ['role' => 'member', 'active' => true, 'country' => 'NL'],
+            ['role' => 'member', 'active' => true, 'country' => 'BE'],
+            ['role' => 'member', 'active' => false, 'country' => 'NL'],
+        ]);
+
+        $ungrouped = DB::connection('google-sheets')
+            ->table('users')
+            ->where('role', 'admin')
+            ->orWhere('active', true)
+            ->where('country', 'NL')
+            ->orderBy('id')
+            ->pluck('id')
+            ->all();
+
+        $grouped = DB::connection('google-sheets')
+            ->table('users')
+            ->where(function ($query): void {
+                $query->where('role', 'admin')->orWhere('active', true);
+            })
+            ->where('country', 'NL')
+            ->orderBy('id')
+            ->pluck('id')
+            ->all();
+
+        $this->assertSame([1, 2], $ungrouped);
+        $this->assertSame([2], $grouped);
+    }
 }

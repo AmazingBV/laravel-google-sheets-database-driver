@@ -1046,7 +1046,8 @@ class GoogleSheetsDatabase
             return true;
         }
 
-        $result = null;
+        $groups = [];
+        $currentGroup = [];
 
         foreach ($wheres as $where) {
             $boolean = (string) ($where['boolean'] ?? 'and');
@@ -1059,13 +1060,25 @@ class GoogleSheetsDatabase
                 $match = ! $match;
             }
 
-            $result = match ($result) {
-                null => $match,
-                default => $boolean === 'or' ? $result || $match : $result && $match,
-            };
+            if ($boolean === 'or' && $currentGroup !== []) {
+                $groups[] = $currentGroup;
+                $currentGroup = [];
+            }
+
+            $currentGroup[] = $match;
         }
 
-        return (bool) $result;
+        if ($currentGroup !== []) {
+            $groups[] = $currentGroup;
+        }
+
+        foreach ($groups as $group) {
+            if (! in_array(false, $group, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

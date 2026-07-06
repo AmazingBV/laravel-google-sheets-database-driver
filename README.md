@@ -216,7 +216,7 @@ Google Sheets has strict API quotas. This driver includes a few protections:
 - reuses sheet-directory and sheet-value reads within one connection
 - throttles read and write requests per minute in the current PHP process
 - retries quota-style failures with exponential backoff
-- uses a configurable Laravel cache store for additional reduction in API traffic
+- uses a configurable Laravel cache store for schema metadata and table locks
 
 If you still hit quotas:
 

@@ -374,11 +374,6 @@ class GoogleSheetsDatabase
     private function loadTableSnapshot(string $table): array
     {
         $logical = $this->normalizeTableName($table);
-        $cacheKey = $this->cacheKey("table:{$logical}");
-
-        if ($this->cache !== null && ($snapshot = $this->cache->get($cacheKey)) !== null) {
-            return $snapshot;
-        }
 
         $schema = $this->getTableSchema($logical);
 
@@ -390,10 +385,7 @@ class GoogleSheetsDatabase
         $values = $this->getSheetValues($physical);
 
         if ($values === []) {
-            $snapshot = ['schema' => $schema, 'rows' => []];
-            $this->remember($cacheKey, $snapshot);
-
-            return $snapshot;
+            return ['schema' => $schema, 'rows' => []];
         }
 
         $header = $this->normalizeHeaderRow($values[0], $logical);
@@ -419,10 +411,7 @@ class GoogleSheetsDatabase
             $rows[] = $mapped;
         }
 
-        $snapshot = ['schema' => $schema, 'rows' => $rows];
-        $this->remember($cacheKey, $snapshot);
-
-        return $snapshot;
+        return ['schema' => $schema, 'rows' => $rows];
     }
 
     private function writeTable(TableSchema $schema, array $rows): void

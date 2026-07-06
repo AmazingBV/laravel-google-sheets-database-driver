@@ -87,6 +87,39 @@ class QuotaAwarenessTest extends TestCase
         $this->assertSame(['id', 'migration', 'batch', 'tables'], $snapshot['__sheetsdbal_migrations']['rows'][0]);
     }
 
+    public function test_persistent_cache_does_not_reuse_stale_table_snapshots_across_connections(): void
+    {
+        Schema::connection('google-sheets')->create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+        });
+
+        DB::connection('google-sheets')->table('users')->insert([
+            'name' => 'Taylor',
+        ]);
+
+        DB::connection('google-sheets')->table('users')->get();
+
+        $snapshot = InMemorySheetsTransport::snapshot('spreadsheet-test');
+        $snapshot['users']['rows'][] = [99, 'Manual'];
+
+        InMemorySheetsTransport::seed('spreadsheet-test', $snapshot);
+        DB::purge('google-sheets');
+
+        DB::connection('google-sheets')->table('users')->insert([
+            'name' => 'Abigail',
+        ]);
+
+        $rows = InMemorySheetsTransport::snapshot('spreadsheet-test')['users']['rows'];
+
+        $this->assertSame([
+            ['id', 'name'],
+            [1, 'Taylor'],
+            [99, 'Manual'],
+            [2, 'Abigail'],
+        ], $rows);
+    }
+
     public function test_stale_create_table_migration_log_is_pruned_so_migrate_recreates_missing_tabs(): void
     {
         InMemorySheetsTransport::seed('spreadsheet-test', [
